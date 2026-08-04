@@ -1,0 +1,443 @@
+Configure Codex on this computer to achieve the following setup:
+
+Primary Agent:
+- model = "gpt-5.6-sol"
+- model_reasoning_effort = "medium"
+- service_tier = "default"
+
+luna_worker SubAgent:
+- model = "gpt-5.6-luna"
+- model_reasoning_effort = "max"
+- service_tier = "priority" (Fast)
+- Must run as a genuine v2 SubAgent delegated by Sol
+
+Important constraints:
+
+1. Inspect the actual Codex version and local configuration structure before making changes. Do not assume this computer is identical to another installation.
+2. Preserve all existing Codex configuration. Do not overwrite, delete, or reformat unrelated content.
+3. Never print tokens, API keys, bearer tokens, authentication files, or other secrets.
+4. Read and verify every target file before editing it.
+5. Only modify top-level keys in config.toml. Do not accidentally insert them into tables such as [model_providers], [mcp_servers], or [plugins].
+6. When modifying the model cache, locate gpt-5.6-luna precisely by its slug. Do not change multi_agent_version for any other model.
+7. This is a local model-cache compatibility patch that is not documented as a stable public OpenAI interface. Preserve the original models_cache.json and use a separate copy.
+8. If a target file already exists, inspect and minimally merge it instead of overwriting it.
+9. After making changes, show a redacted diff and run proportional validation.
+10. The current Codex task may not hot-reload the model catalog. After editing, tell me to restart Codex and run the final smoke test in a completely new task.
+
+Phase 1: Inspect the environment
+
+Perform the following read-only checks:
+
+- Get the installed Codex version:
+
+  codex --version
+
+- Determine Codex Home, normally:
+
+  ~/.codex
+
+- Check whether these files exist:
+
+  ~/.codex/config.toml
+  ~/.codex/models_cache.json
+  ~/.codex/agents/luna-worker.toml
+
+- Inspect the top-level JSON structure of models_cache.json.
+- Locate these three models and display only non-sensitive fields:
+
+  gpt-5.6-sol
+  gpt-5.6-terra
+  gpt-5.6-luna
+
+Only display:
+
+- slug
+- display_name
+- multi_agent_version
+- supported_reasoning_levels
+- default_reasoning_level
+- additional_speed_tiers
+- service_tiers
+
+Specifically confirm:
+
+- Whether Sol has multi_agent_version = "v2"
+- Whether Terra has multi_agent_version = "v2"
+- Whether Luna has multi_agent_version = "v1"
+- Whether Luna declares a priority/Fast service tier
+
+Stop instead of blindly modifying anything if:
+
+- models_cache.json does not exist;
+- gpt-5.6-luna cannot be found;
+- the cache structure differs materially from what is expected;
+- Luna is already officially configured as v2.
+
+If Luna is already v2, do not create the cache patch. Continue directly to the custom Agent and validation phases.
+
+Phase 2: Create the custom Luna Agent
+
+Create or minimally update:
+
+~/.codex/agents/luna-worker.toml
+
+The desired content is:
+
+name = "luna_worker"
+description = "Preferred focused worker for well-scoped, clearly bounded delegated tasks that can be completed independently without changing the parent task's objective or expanding its scope."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "max"
+service_tier = "priority"
+
+developer_instructions = """
+You are luna_worker, a focused subagent for delegated work with an explicit scope, clear boundaries, and an independently verifiable completion condition.
+
+Work only on the task the parent agent delegates. Preserve the parent task's objective, constraints, assumptions, and acceptance criteria. Do not reinterpret or modify the overall goal, add adjacent objectives, or expand the work beyond the delegated boundary.
+
+Before acting, identify the exact deliverable and the files, systems, or evidence in scope. Make reasonable local assumptions only when they do not broaden or materially alter the task. If a missing decision would change the intended result or require wider authority, stop and report the precise blocker to the parent agent.
+
+Perform the delegated work independently and completely. Prefer the smallest sufficient change or investigation, preserve unrelated user work and configuration, and run proportionate non-destructive validation. Do not delegate further unless the parent explicitly authorizes it.
+
+Return a concise handoff containing: the outcome, relevant evidence or validation, files changed if any, and any remaining caveat or blocker. Do not claim completion unless the delegated acceptance condition is satisfied.
+"""
+
+Notes:
+
+- name, description, and developer_instructions are required fields for a standalone Custom Agent.
+- Fast mode must use TOML syntax:
+
+  service_tier = "priority"
+
+Do not use JSON syntax:
+
+  "service_tier": "priority"
+
+Phase 3: Create a Luna v2 model catalog copy
+
+Only perform this phase if Luna is still marked as v1 in the original cache.
+
+Preserve the original file:
+
+~/.codex/models_cache.json
+
+Create a copy:
+
+~/.codex/models_cache-luna.json
+
+For example:
+
+cp ~/.codex/models_cache.json ~/.codex/models_cache-luna.json
+
+In the copied file, locate the model object whose slug is:
+
+"slug": "gpt-5.6-luna"
+
+Change only the multi_agent_version belonging to that Luna object:
+
+"multi_agent_version": "v1"
+
+to:
+
+"multi_agent_version": "v2"
+
+Use structured validation to confirm:
+
+- Only gpt-5.6-luna changed from v1 to v2.
+- Sol, Terra, and every other model remain unchanged.
+- The JSON remains valid.
+- The total number of models is unchanged.
+- Luna’s base_instructions, reasoning levels, service tiers, and other fields remain unchanged.
+
+Do not use an imprecise operation such as replacing the first occurrence of "v1", because the cache may contain multiple v1 models.
+
+Phase 4: Update the global config.toml
+
+Minimally update:
+
+~/.codex/config.toml
+
+Set these top-level values:
+
+service_tier = "default"
+model_catalog_json = "models_cache-luna.json"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "medium"
+
+Rules:
+
+1. If these top-level keys already exist, update them instead of creating duplicate TOML keys.
+2. If config.toml already points to a different model_catalog_json, do not overwrite it blindly. Report its current purpose and determine whether the change can be safely merged.
+3. Do not modify model providers, MCP servers, plugins, permissions, projects, notification settings, or authentication-related content.
+4. The primary Agent must retain service_tier = "default".
+5. Only luna-worker.toml should use service_tier = "priority", so Fast mode applies only to the Luna SubAgent.
+
+The expected top-level structure should resemble:
+
+service_tier = "default"
+model_catalog_json = "models_cache-luna.json"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "medium"
+
+# Preserve every other existing setting below
+review_model = "..."
+...
+
+Phase 5: Static validation
+
+Run the following checks without displaying secrets.
+
+1. Validate the JSON file:
+
+   jq empty ~/.codex/models_cache-luna.json
+
+2. Read only Luna’s safe fields:
+
+   jq -c '
+     .models[]
+     | select(.slug == "gpt-5.6-luna")
+     | {
+         slug,
+         multi_agent_version,
+         additional_speed_tiers,
+         service_tiers
+       }
+   ' ~/.codex/models_cache-luna.json
+
+The output should contain at least:
+
+{
+  "slug": "gpt-5.6-luna",
+  "multi_agent_version": "v2"
+}
+
+If the cache declares Fast support, it should also contain:
+
+"additional_speed_tiers": ["fast"]
+
+and a service tier resembling:
+
+{
+  "id": "priority",
+  "name": "Fast"
+}
+
+3. Validate both TOML files with a real TOML parser:
+
+- config.toml must parse successfully.
+- luna-worker.toml must parse successfully.
+- Confirm that config.toml contains:
+
+  model_catalog_json == "models_cache-luna.json"
+  model == "gpt-5.6-sol"
+  model_reasoning_effort == "medium"
+  service_tier == "default"
+
+- Confirm that luna-worker.toml contains:
+
+  name == "luna_worker"
+  model == "gpt-5.6-luna"
+  model_reasoning_effort == "max"
+  service_tier == "priority"
+
+Use Python tomllib if available. Otherwise, use Codex’s bundled runtime or another reliable TOML parser.
+
+4. Run:
+
+   codex doctor --json
+
+Only extract and report:
+
+- codexVersion
+- checks["config.load"].status
+- checks["config.load"].summary
+- the current default model
+
+Do not print the complete config/read response because it may contain provider tokens or other sensitive values.
+
+Expected result:
+
+config.load.status == "ok"
+
+5. Run:
+
+   codex debug models
+
+From the output, extract only these fields for gpt-5.6-luna:
+
+- slug
+- multi_agent_version
+- service_tiers
+
+This must prove that Codex itself loaded the custom catalog, rather than merely confirming that a JSON file was changed on disk.
+
+Phase 6: Show a redacted diff
+
+Show only the following expected changes.
+
+1. config.toml:
+
++model_catalog_json = "models_cache-luna.json"
+
+Also confirm that the primary model settings remain:
+
+ model = "gpt-5.6-sol"
+ model_reasoning_effort = "medium"
+ service_tier = "default"
+
+2. luna-worker.toml:
+
+ model = "gpt-5.6-luna"
+ model_reasoning_effort = "max"
++service_tier = "priority"
+
+3. models_cache-luna.json compared with the original cache:
+
+ "slug": "gpt-5.6-luna"
+-"multi_agent_version": "v1"
++"multi_agent_version": "v2"
+
+Do not include authentication fields, provider tokens, API keys, or unrelated configuration in the diff.
+
+Phase 7: Restart requirement
+
+After static validation, do not repeatedly test inside the original task.
+
+Tell me explicitly to:
+
+1. Completely quit Codex.
+2. Restart Codex.
+3. Create a completely new task.
+4. Avoid continuing the task that existed before the configuration change, because the spawn_agent model allowlist and tool definitions may have been fixed when that task started.
+
+Phase 8: Smoke test in the new task
+
+After restarting Codex and creating a new task, perform this test:
+
+“Use luna_worker to start a read-only smoke test. Inspect only one clearly specified file. Do not modify files and do not expand the scope. Monitor the SubAgent from creation through completion, and verify any control-plane metadata available for agent role, model, reasoning effort, and service tier.”
+
+Recommended smoke-test task:
+
+- Read ~/.codex/agents/luna-worker.toml.
+- Verify:
+
+  name = luna_worker
+  model = gpt-5.6-luna
+  model_reasoning_effort = max
+  service_tier = priority
+
+- Do not modify any files.
+- Return PASS or FAIL.
+
+When dispatching, prefer selecting the named Agent luna_worker.
+
+If the interface requires explicit model parameters, request:
+
+- model = "gpt-5.6-luna"
+- reasoning_effort = "max"
+
+Monitor and confirm at least:
+
+- The primary Agent remains Sol.
+- A SubAgent is genuinely created.
+- Its state progresses from running to completed.
+- The control layer accepts Luna instead of returning:
+
+  Unknown model `gpt-5.6-luna`
+
+- If runtime metadata is available, confirm:
+
+  agent role = luna_worker
+  model = gpt-5.6-luna
+  reasoning effort = max
+  service tier = priority
+
+Do not rely solely on the child Agent claiming, “I am Luna.” Prefer control-plane evidence such as agent_path, agent_role, requested model, thread metadata, and service tier.
+
+Phase 9: Troubleshooting
+
+If an old task still reports:
+
+Unknown model `gpt-5.6-luna`.
+Available models: gpt-5.6-sol, gpt-5.6-terra
+
+First confirm that:
+
+- Codex was completely restarted.
+- A new task was created.
+- The new task loaded the custom model_catalog_json.
+
+If a new task still fails, check these items in order:
+
+1. Does codex debug models show Luna with multi_agent_version = "v2"?
+2. Is model_catalog_json configured at the TOML top level?
+3. Does the relative path resolve to ~/.codex/models_cache-luna.json?
+4. Does luna-worker.toml include name, description, and developer_instructions?
+5. Is the Agent’s name exactly luna_worker?
+6. Does the installed Codex version still support standalone ~/.codex/agents/*.toml files?
+7. Is a system or administrator policy overriding the model catalog?
+8. Is a project-level .codex/config.toml overriding global configuration?
+9. Does spawn_agent expose a named Agent or agent_type selector?
+10. Has a newer Codex release changed the model-cache structure or removed model_catalog_json?
+
+Do not pretend the Luna Agent was used merely by naming the task luna_worker. There must be control-plane evidence that the Luna model was accepted.
+
+Phase 10: Final report
+
+After success, report:
+
+1. The installed Codex version.
+2. The three files modified or created.
+3. A redacted diff.
+4. Static validation results.
+5. The new-task smoke-test state transitions.
+6. The actual primary Agent configuration.
+7. The actual child Agent configuration.
+8. Whether Fast/priority was confirmed.
+9. Whether any unrelated configuration was changed.
+10. Maintenance warnings.
+
+Expected final state:
+
+Primary dispatcher:
+- GPT-5.6 Sol
+- medium
+- default
+
+luna_worker SubAgent:
+- GPT-5.6 Luna
+- max
+- priority/Fast
+- multi_agent_version = v2
+
+Phase 11: Rollback instructions
+
+Provide a rollback procedure, but do not perform the rollback automatically.
+
+Rollback steps:
+
+1. Remove this line from ~/.codex/config.toml:
+
+   model_catalog_json = "models_cache-luna.json"
+
+2. Delete or disable:
+
+   ~/.codex/models_cache-luna.json
+
+3. If luna_worker is no longer needed, delete:
+
+   ~/.codex/agents/luna-worker.toml
+
+   If a normal, non-Fast Luna Agent is still desired, keep the file but remove:
+
+   service_tier = "priority"
+
+4. Restart Codex and create a new task.
+
+Maintenance warnings:
+
+- This is a local model-cache patch, not a documented stable public interface.
+- Recheck models_cache.json after every Codex update.
+- The custom models_cache-luna.json will not automatically inherit new models or fields from the official cache.
+- After an update, create a fresh copy of the latest models_cache.json and modify only Luna’s multi_agent_version.
+- If an official future cache already marks Luna as v2, remove the custom catalog override and return to the official model catalog.
+- priority/Fast may improve speed but may also increase usage.
