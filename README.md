@@ -1,5 +1,6 @@
 # Codex-SubAgent-Skills
 让Codex自动使用更具有性价比的Luna Max作为子智能体代理（性能大约和Sol-High相当，但是Token消耗度大约只有1/4，开启fast后大约为1/2），帮助你砍掉大约40%的额度使用；一个Prompt配置即可,包含开启功能测试等。**开启后，需要重启Codex + 开一个新的任务**进行测试。
+![Uploading 1d009256bd56d8351fc8b7c493f4be7e.png…]()
 
 # 🔔中文提示词
 
