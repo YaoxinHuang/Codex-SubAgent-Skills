@@ -1,2 +1,450 @@
 # Codex-SubAgent-Skills
-让Codex自动使用更具有性价比的Luna Max作为代理（性能大约和Sol-High相当，但是代币消耗度大约只有1/4，开启fast后大约为1/2），帮助你砍掉大约40%的额度使用；一个Prompt配置即可。
+让Codex自动使用更具有性价比的Luna Max作为子智能体代理（性能大约和Sol-High相当，但是Token消耗度大约只有1/4，开启fast后大约为1/2），帮助你砍掉大约40%的额度使用；一个Prompt配置即可,包含开启功能测试等。**开启后，需要重启Codex + 开一个新的任务**进行测试。
+
+# 🔔中文提示词
+
+你需要在这台电脑上配置 Codex，实现以下目标：
+
+主 Agent：
+- model = "gpt-5.6-sol"
+- model_reasoning_effort = "medium"
+- service_tier = "default"
+
+子 Agent luna_worker：
+- model = "gpt-5.6-luna"
+- model_reasoning_effort = "max"
+- service_tier = "priority"（Fast）
+- 作为真正的 v2 SubAgent 被 Sol 调度
+
+重要约束：
+
+1. 先检查本机实际 Codex 版本和配置结构，不要假设与其他电脑完全相同。
+2. 保留所有现有 Codex 配置，不得覆盖、删除或重排无关内容。
+3. 不得在输出中展示 token、API key、bearer token、认证文件内容或其他秘密。
+4. 修改前先读取目标文件并确认精确位置。
+5. 对 config.toml 只修改顶层字段，不要误写进 [model_providers]、[mcp_servers] 等 TOML table。
+6. 修改 models cache 时必须根据模型的 slug 精确定位 gpt-5.6-luna，不得把其他模型的 multi_agent_version 一并修改。
+7. 这是一个未由官方公开承诺的本地模型缓存兼容补丁。必须保留原始 models_cache.json，并使用独立副本。
+8. 如果目标文件已经存在，不要直接覆盖；先检查现有内容，然后进行最小合并。
+9. 完成后展示经过脱敏的 diff，并运行验证。
+10. 当前任务不会热加载模型目录。修改后必须提示我重启 Codex，并在全新的任务中进行最终 smoke test。
+
+第一阶段：环境探测
+
+请执行只读检查：
+
+- 获取 Codex 版本：
+
+  codex --version
+
+- 确认 Codex Home，通常为：
+
+  ~/.codex
+
+- 检查以下文件是否存在：
+
+  ~/.codex/config.toml
+  ~/.codex/models_cache.json
+  ~/.codex/agents/luna-worker.toml
+
+- 检查 models_cache.json 的 JSON 顶层结构。
+- 精确找到以下三个模型并只展示非敏感字段：
+
+  gpt-5.6-sol
+  gpt-5.6-terra
+  gpt-5.6-luna
+
+只展示：
+
+- slug
+- display_name
+- multi_agent_version
+- supported_reasoning_levels
+- default_reasoning_level
+- additional_speed_tiers
+- service_tiers
+
+重点确认：
+
+- Sol 是否为 multi_agent_version = "v2"
+- Terra 是否为 multi_agent_version = "v2"
+- Luna 是否为 multi_agent_version = "v1"
+- Luna 是否声明 priority/Fast service tier
+
+如果：
+
+- models_cache.json 不存在；
+- 找不到 gpt-5.6-luna；
+- 缓存结构与预期明显不同；
+- Luna 已经由官方设为 v2；
+
+请停止盲目修改并报告实际情况。
+
+如果 Luna 已经是 v2，则不需要创建缓存补丁，直接进入自定义 Agent 和验证步骤。
+
+第二阶段：创建自定义 Luna Agent
+
+创建或最小更新：
+
+~/.codex/agents/luna-worker.toml
+
+内容目标如下：
+
+name = "luna_worker"
+description = "Preferred focused worker for well-scoped, clearly bounded delegated tasks that can be completed independently without changing the parent task's objective or expanding its scope."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "max"
+service_tier = "priority"
+
+developer_instructions = """
+You are luna_worker, a focused subagent for delegated work with an explicit scope, clear boundaries, and an independently verifiable completion condition.
+
+Work only on the task the parent agent delegates. Preserve the parent task's objective, constraints, assumptions, and acceptance criteria. Do not reinterpret or modify the overall goal, add adjacent objectives, or expand the work beyond the delegated boundary.
+
+Before acting, identify the exact deliverable and the files, systems, or evidence in scope. Make reasonable local assumptions only when they do not broaden or materially alter the task. If a missing decision would change the intended result or require wider authority, stop and report the precise blocker to the parent agent.
+
+Perform the delegated work independently and completely. Prefer the smallest sufficient change or investigation, preserve unrelated user work and configuration, and run proportionate non-destructive validation. Do not delegate further unless the parent explicitly authorizes it.
+
+Return a concise handoff containing: the outcome, relevant evidence or validation, files changed if any, and any remaining caveat or blocker. Do not claim completion unless the delegated acceptance condition is satisfied.
+"""
+
+注意：
+
+- name、description、developer_instructions 是独立 Custom Agent 的必需字段。
+- Fast 在 TOML 中应写作：
+
+  service_tier = "priority"
+
+不要写成 JSON 语法：
+
+  "service_tier": "priority"
+
+第三阶段：创建 Luna v2 模型目录副本
+
+只有在原始缓存中 Luna 仍为 v1 时才执行。
+
+保留原文件：
+
+~/.codex/models_cache.json
+
+创建副本：
+
+~/.codex/models_cache-luna.json
+
+可以复制原始文件：
+
+cp ~/.codex/models_cache.json ~/.codex/models_cache-luna.json
+
+然后只在副本中找到：
+
+"slug": "gpt-5.6-luna"
+
+并仅把属于这个 Luna 对象的：
+
+"multi_agent_version": "v1"
+
+修改为：
+
+"multi_agent_version": "v2"
+
+必须通过结构化检查确认：
+
+- 只有 gpt-5.6-luna 从 v1 变成 v2；
+- Sol、Terra 及其他模型没有发生变化；
+- JSON 仍然有效；
+- 模型数量没有改变；
+- Luna 的 base_instructions、reasoning levels、service tiers 和其他字段保持不变。
+
+不能使用“替换文件中第一个 v1”之类不精确的方法，因为缓存中可能有多个 v1 模型。
+
+第四阶段：更新全局 config.toml
+
+最小修改：
+
+~/.codex/config.toml
+
+在 TOML 顶层设置：
+
+service_tier = "default"
+model_catalog_json = "models_cache-luna.json"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "medium"
+
+规则：
+
+1. 如果这些字段已存在，更新已有顶层字段，不要制造重复键。
+2. 如果 config.toml 已经设置了另一个 model_catalog_json，不得直接覆盖；先报告现有用途，并判断是否可以安全合并。
+3. 不要修改 model_providers、MCP、plugins、permissions、projects、notify 或认证相关内容。
+4. 主 Agent 的 service_tier 必须保持 default。
+5. priority 只写在 luna-worker.toml 中，避免把主 Agent 也切换到 Fast。
+
+期望结构类似：
+
+service_tier = "default"
+model_catalog_json = "models_cache-luna.json"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "medium"
+
+# 后面保留所有原有配置
+review_model = "..."
+...
+
+第五阶段：静态验证
+
+执行以下验证，但不要输出秘密配置值。
+
+1. 验证 JSON：
+
+   jq empty ~/.codex/models_cache-luna.json
+
+2. 精确读取 Luna 的安全字段：
+
+   jq -c '
+     .models[]
+     | select(.slug == "gpt-5.6-luna")
+     | {
+         slug,
+         multi_agent_version,
+         additional_speed_tiers,
+         service_tiers
+       }
+   ' ~/.codex/models_cache-luna.json
+
+期望至少看到：
+
+{
+  "slug": "gpt-5.6-luna",
+  "multi_agent_version": "v2"
+}
+
+如果缓存声明 Fast，还应看到：
+
+"additional_speed_tiers": ["fast"]
+
+以及 service tier：
+
+{
+  "id": "priority",
+  "name": "Fast"
+}
+
+3. 用 TOML 解析器验证：
+
+- config.toml 能成功解析；
+- luna-worker.toml 能成功解析；
+- config.toml 中：
+
+  model_catalog_json == "models_cache-luna.json"
+  model == "gpt-5.6-sol"
+  model_reasoning_effort == "medium"
+  service_tier == "default"
+
+- luna-worker.toml 中：
+
+  name == "luna_worker"
+  model == "gpt-5.6-luna"
+  model_reasoning_effort == "max"
+  service_tier == "priority"
+
+如果系统 Python 支持 tomllib，可以使用它；否则使用 Codex 自带运行时或其他可靠 TOML 解析器。
+
+4. 运行：
+
+   codex doctor --json
+
+只提取并报告：
+
+- codexVersion
+- checks["config.load"].status
+- checks["config.load"].summary
+- 当前默认 model
+
+不要展示完整 config/read 结果，因为其中可能包含 provider token 或其他敏感字段。
+
+期望：
+
+config.load.status == "ok"
+
+5. 运行：
+
+   codex debug models
+
+从输出中只提取 gpt-5.6-luna 的：
+
+- slug
+- multi_agent_version
+- service_tiers
+
+这一步必须证明 Codex 实际加载的是自定义 catalog，而不只是磁盘文件被修改。
+
+第六阶段：展示脱敏 diff
+
+展示且只展示以下预期差异：
+
+1. config.toml：
+
++model_catalog_json = "models_cache-luna.json"
+
+以及主模型字段最终为：
+
+ model = "gpt-5.6-sol"
+ model_reasoning_effort = "medium"
+ service_tier = "default"
+
+2. luna-worker.toml：
+
+ model = "gpt-5.6-luna"
+ model_reasoning_effort = "max"
++service_tier = "priority"
+
+3. models_cache-luna.json 相对原缓存：
+
+ "slug": "gpt-5.6-luna"
+-"multi_agent_version": "v1"
++"multi_agent_version": "v2"
+
+不得在 diff 中展示认证字段、provider token、API key 或无关配置内容。
+
+第七阶段：重启要求
+
+静态验证完成后，不要在原任务中反复测试。
+
+明确告诉我：
+
+1. 完全退出 Codex。
+2. 重新启动 Codex。
+3. 创建一个全新的任务。
+4. 不要继续修改前已经打开的旧任务，因为 spawn_agent 的模型白名单和工具定义可能在任务启动时已固定。
+
+第八阶段：新任务中的 smoke test
+
+重启并创建新任务后，使用以下测试任务：
+
+“请使用 luna_worker 启动一个只读 smoke test。只检查一个明确文件，不允许修改文件，不允许扩大范围。请监控子代理从创建、运行到完成的状态，并核对控制层能够看到的 agent role、model、reasoning effort 和 service tier。”
+
+推荐 smoke test 内容：
+
+- 读取 ~/.codex/agents/luna-worker.toml；
+- 验证：
+
+  name = luna_worker
+  model = gpt-5.6-luna
+  model_reasoning_effort = max
+  service_tier = priority
+
+- 不修改任何文件；
+- 返回 PASS/FAIL。
+
+调度时应优先按命名 Agent 选择 luna_worker。
+
+如果接口需要显式模型参数，则请求：
+
+- model = "gpt-5.6-luna"
+- reasoning_effort = "max"
+
+监控至少确认：
+
+- 主 Agent 仍为 Sol；
+- 子代理确实创建；
+- 子代理状态经历 running → completed；
+- 控制层接受 Luna，而不是返回：
+
+  Unknown model `gpt-5.6-luna`
+
+- 如果运行元数据可见，核对：
+
+  agent role = luna_worker
+  model = gpt-5.6-luna
+  reasoning effort = max
+  service tier = priority
+
+不要仅依赖子代理自己声称“我是 Luna”。优先使用父调度器、线程元数据、agent_path、agent_role、请求模型和 service tier 等控制层证据。
+
+第九阶段：故障判断
+
+如果旧任务仍提示：
+
+Unknown model `gpt-5.6-luna`.
+Available models: gpt-5.6-sol, gpt-5.6-terra
+
+先确认是否真的：
+
+- 完全重启了 Codex；
+- 创建了新任务；
+- 新任务加载了自定义 model_catalog_json。
+
+如果新任务仍失败，依次检查：
+
+1. codex debug models 是否显示 Luna=v2。
+2. model_catalog_json 是否是顶层配置。
+3. 相对路径是否正确解析到 ~/.codex/models_cache-luna.json。
+4. luna-worker.toml 是否包含 name、description、developer_instructions。
+5. Agent 名称是否为 luna_worker。
+6. 当前 Codex 版本是否仍支持独立 ~/.codex/agents/*.toml。
+7. 是否存在系统或管理员策略覆盖模型目录。
+8. 是否有项目级 .codex/config.toml 覆盖全局配置。
+9. spawn_agent 工具是否暴露命名 Agent/agent_type 选择。
+10. 新版本是否改变了模型缓存结构或废弃 model_catalog_json。
+
+不要通过把任务名写成 luna_worker 来假装使用了 Luna。必须有控制层证据证明实际模型已被接受。
+
+第十阶段：最终报告
+
+成功后请给出：
+
+1. Codex 版本。
+2. 修改的三个文件。
+3. 脱敏 diff。
+4. 静态验证结果。
+5. 新任务 smoke test 的状态变化。
+6. 主 Agent 实际配置。
+7. 子 Agent 实际配置。
+8. 是否确认 Fast/priority。
+9. 是否修改了任何无关配置。
+10. 后续维护提醒。
+
+最终期望：
+
+主调度：
+- GPT-5.6 Sol
+- medium
+- default
+
+子代理 luna_worker：
+- GPT-5.6 Luna
+- max
+- priority/Fast
+- multi_agent_version = v2
+
+第十一阶段：回滚说明
+
+必须提供回滚方案，但不要自动回滚。
+
+回滚步骤：
+
+1. 从 ~/.codex/config.toml 删除：
+
+   model_catalog_json = "models_cache-luna.json"
+
+2. 删除或停用：
+
+   ~/.codex/models_cache-luna.json
+
+3. 如果不再需要 luna_worker，删除：
+
+   ~/.codex/agents/luna-worker.toml
+
+   如果仍需要普通 Luna Agent，则可以保留文件并删除：
+
+   service_tier = "priority"
+
+4. 重启 Codex并创建新任务。
+
+维护提醒：
+
+- 这是本地模型缓存补丁，不是官方公开稳定接口。
+- Codex 更新后必须重新检查 models_cache.json。
+- 自定义 models_cache-luna.json 不会自动继承官方缓存的新模型和字段。
+- 更新时应从最新 models_cache.json 重新复制，然后只修改 Luna 的 multi_agent_version。
+- 如果未来官方缓存已将 Luna 设置为 v2，应取消自定义 catalog，恢复使用官方模型目录。
+- priority/Fast 可能提高速度，也可能增加使用量
